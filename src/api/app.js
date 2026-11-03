@@ -1,9 +1,12 @@
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { pinoHttp } from 'pino-http';
 import { emailRoutes } from './routes/emailRoutes.js';
 import { healthRoutes } from './routes/healthRoutes.js';
 import { userRoutes } from './routes/userRoutes.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
+
+const PUBLIC_DIR = fileURLToPath(new URL('../../public/', import.meta.url));
 
 /**
  * Builds the Express app. Services are injected so the HTTP layer never touches
@@ -27,7 +30,8 @@ export function createApp({ services, logger }) {
   }
   app.use(express.json({ limit: '1mb' }));
 
-  app.get('/', (req, res) => res.json({ name: 'mail-queue-api', health: '/health' }));
+  // Demo dashboard (static HTML that calls the JSON endpoints below).
+  app.use(express.static(PUBLIC_DIR));
   app.use('/health', healthRoutes(services.healthService));
   app.use('/emails', emailRoutes(services.emailService));
   app.use('/users', userRoutes(services.userService));

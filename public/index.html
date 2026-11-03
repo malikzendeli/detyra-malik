@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="sq">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mail Queue Dashboard</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #1b1f24; --muted: #5f6b7a; --border: #e2e6eb;
+    --accent: #3b5bdb; --accent-soft: #e8edfd;
+    --pending: #b7791f; --pending-soft: #fdf3e1;
+    --sent: #2f855a; --sent-soft: #e3f4ea;
+    --failed: #c53030; --failed-soft: #fbe6e6;
+    --mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151a; --card: #1b1f26; --text: #e6e9ee; --muted: #9aa5b4; --border: #2c323c;
+      --accent: #7c95f5; --accent-soft: #232b45;
+      --pending: #e6b25c; --pending-soft: #3a2f1c;
+      --sent: #5fc28c; --sent-soft: #1d3327;
+      --failed: #f07c7c; --failed-soft: #3d2023;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1120px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 0; }
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  p { margin: 0 0 8px; }
+  code { font-family: var(--mono); font-size: 13px; background: var(--accent-soft); padding: 1px 5px; border-radius: 4px; }
+  .muted { color: var(--muted); }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+  .grid { display: grid; gap: 16px; }
+  .cols-2 { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+  .cols-3 { grid-template-columns: repeat(3, 1fr); }
+  .cols-4 { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+  section { margin-top: 24px; }
+
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+  .ok { color: var(--sent); background: var(--sent-soft); }
+  .bad { color: var(--failed); background: var(--failed-soft); }
+  .warn { color: var(--pending); background: var(--pending-soft); }
+
+  .stat { text-align: center; }
+  .stat .num { font-size: 32px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .stat.pending .num { color: var(--pending); }
+  .stat.sent .num { color: var(--sent); }
+  .stat.failed .num { color: var(--failed); }
+
+  /* Flow diagram */
+  .flow { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; }
+  .node { flex: 1 1 120px; border: 1px solid var(--border); border-radius: 10px; padding: 10px; font-size: 13px; transition: background .3s, border-color .3s; }
+  .node b { display: block; font-size: 14px; }
+  .node.active { border-color: var(--accent); background: var(--accent-soft); }
+  .arrow { align-self: center; color: var(--muted); }
+  .outcomes { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; font-size: 13px; }
+
+  /* Forms */
+  label { display: block; font-size: 13px; font-weight: 600; margin: 10px 0 4px; }
+  input, textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; }
+  textarea { min-height: 64px; resize: vertical; }
+  button { margin-top: 12px; padding: 8px 14px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+  button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); margin-top: 0; padding: 4px 10px; font-size: 13px; }
+  button:disabled { opacity: .5; cursor: default; }
+  .quick { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .quick button { margin: 0; padding: 3px 8px; font-size: 12px; background: var(--accent-soft); color: var(--accent); }
+  pre.response { font-family: var(--mono); font-size: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px; overflow: auto; max-height: 220px; margin: 12px 0 0; white-space: pre-wrap; word-break: break-word; }
+  .http { font-weight: 700; }
+
+  /* Tracker */
+  .timeline { list-style: none; padding: 0; margin: 0; }
+  .timeline li { padding: 6px 0 6px 22px; position: relative; font-size: 14px; }
+  .timeline li::before { content: ""; position: absolute; left: 4px; top: 12px; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+  .timeline li.pending::before { background: var(--pending); }
+  .timeline li.sent::before { background: var(--sent); }
+  .timeline li.failed::before { background: var(--failed); }
+  .timeline time { color: var(--muted); font-family: var(--mono); font-size: 12px; margin-right: 6px; }
+
+  /* Table */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  td.mono { font-family: var(--mono); font-size: 12px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .badge.pending { color: var(--pending); background: var(--pending-soft); }
+  .badge.sent { color: var(--sent); background: var(--sent-soft); }
+  .badge.failed { color: var(--failed); background: var(--failed-soft); }
+  tr.flash { animation: flash 1.2s ease-out; }
+  @keyframes flash { from { background: var(--accent-soft); } to { background: transparent; } }
+  .err { color: var(--failed); max-width: 280px; }
+
+  .layer { border-left: 4px solid var(--accent); }
+  .layer h3 { margin: 0 0 4px; font-size: 15px; }
+  .layer ul { margin: 6px 0 0; padding-left: 18px; font-size: 13px; }
+
+  @media (max-width: 640px) { .cols-3 { grid-template-columns: 1fr; } .arrow { display: none; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>📬 Mail Queue Dashboard</h1>
+      <p class="muted">Emailet nuk dërgohen nga endpoint-i — futen në radhë (DB) dhe i dërgon worker-i në background.</p>
+    </div>
+    <div id="health" class="pill warn"><span class="dot"></span>Duke kontrolluar…</div>
+  </header>
+
+  <!-- 1. Health + stats -->
+  <section class="grid cols-4">
+    <div class="card">
+      <h2>GET /health</h2>
+      <p>HTTP: <span id="h-code" class="http">–</span></p>
+      <p>Aplikacioni: <span id="h-app">–</span></p>
+      <p>Databaza: <span id="h-db">–</span></p>
+      <p class="muted" style="font-size:13px">200 = gjithçka OK · 503 = DB nuk arrihet. Këtë endpoint e monitoron Asniher.</p>
+    </div>
+    <div class="card stat pending"><h2>Pending</h2><div class="num" id="s-pending">–</div><p class="muted">në radhë / në pritje të riprovimit</p></div>
+    <div class="card stat sent"><h2>Sent</h2><div class="num" id="s-sent">–</div><p class="muted">dërguar me sukses</p></div>
+    <div class="card stat failed"><h2>Failed</h2><div class="num" id="s-failed">–</div><p class="muted">dështuan pas 4 përpjekjeve</p></div>
+  </section>
+
+  <!-- 2. Flow -->
+  <section class="card">
+    <h2>Si funksionon (ndiqe ndërsa dërgon një email)</h2>
+    <div class="flow">
+      <div class="node" data-step="api"><b>1. api</b>Validon kërkesën (zod), kthen <code>202</code></div>
+      <div class="arrow">→</div>
+      <div class="node" data-step="service"><b>2. services</b><code>emailService.enqueue()</code></div>
+      <div class="arrow">→</div>
+      <div class="node" data-step="data"><b>3. data</b><code>INSERT</code> në <code>email_jobs</code> me status <i>pending</i></div>
+      <div class="arrow">→</div>
+      <div class="node" data-step="worker"><b>4. worker</b>Çdo 2s merr job-et (<code>SKIP LOCKED</code>)</div>
+      <div class="arrow">→</div>
+      <div class="node" data-step="resend"><b>5. Resend</b>Dërgon email-in</div>
+    </div>
+    <div class="outcomes">
+      <span class="badge sent">sukses → sent</span>
+      <span class="badge pending">gabim → pending, riprovim pas 5s · 10s · 20s</span>
+      <span class="badge failed">gabim në përpjekjen e 4-t → failed</span>
+    </div>
+  </section>
+
+  <!-- 3. Forms + tracker -->
+  <section class="grid cols-2">
+    <div class="card">
+      <h2>POST /emails — vendos një email në radhë</h2>
+      <form id="email-form">
+        <label for="to">Për (to)</label>
+        <input id="to" name="to" value="delivered@resend.dev" required>
+        <div class="quick">
+          <button type="button" data-to="delivered@resend.dev">✅ delivered@resend.dev</button>
+          <button type="button" data-to="test@fail.test">💥 test@fail.test (dështon → riprovime)</button>
+          <button type="button" data-to="jo-email">⚠️ email i pavlefshëm (400)</button>
+        </div>
+        <label for="subject">Subjekti</label>
+        <input id="subject" name="subject" value="Përshëndetje nga radha!">
+        <label for="text">Teksti</label>
+        <textarea id="text" name="text">Ky email kaloi nga API → DB → worker → Resend.</textarea>
+        <button type="submit">Dërgo në radhë</button>
+      </form>
+      <pre class="response" id="email-response" hidden></pre>
+    </div>
+
+    <div class="card">
+      <h2>Ndjekja e job-it të fundit</h2>
+      <p class="muted" id="tracker-empty">Dërgo një email ose krijo një user dhe shiko këtu si ndryshon statusi.</p>
+      <p id="tracker-id" class="mono" hidden></p>
+      <ul class="timeline" id="timeline"></ul>
+
+      <h2 style="margin-top:20px">POST /users — regjistro user</h2>
+      <p class="muted" style="font-size:13px">User-i dhe welcome email-i ruhen në <b>një transaksion</b>: ose të dyja, ose asnjëra.</p>
+      <form id="user-form">
+        <label for="u-name">Emri</label>
+        <input id="u-name" name="name" value="Shefket" required>
+        <label for="u-email">Email</label>
+        <input id="u-email" name="email" required>
+        <button type="submit">Regjistro</button>
+      </form>
+      <pre class="response" id="user-response" hidden></pre>
+    </div>
+  </section>
+
+  <!-- 4. Jobs table -->
+  <section class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+      <h2 style="margin:0">GET /emails — tabela <code>email_jobs</code> (rifreskohet çdo 2s)</h2>
+      <span class="muted" id="last-refresh" style="font-size:12px"></span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Status</th><th>Për</th><th>Subjekti</th><th>Përpjekje</th><th>Gabimi i fundit</th><th>Riprovimi tjetër</th><th>Krijuar</th><th></th></tr></thead>
+        <tbody id="jobs"><tr><td colspan="8" class="muted">Duke ngarkuar…</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 5. Layers -->
+  <section>
+    <h2>Arkitektura me 4 shtresa (secila thërret vetëm atë poshtë)</h2>
+    <div class="grid cols-4">
+      <div class="card layer"><h3>api</h3><p class="muted">src/api</p><ul><li>routes, controllers</li><li>validim me zod</li><li>vetëm HTTP: status codes, JSON</li></ul></div>
+      <div class="card layer"><h3>services</h3><p class="muted">src/services</p><ul><li>logjika e biznesit</li><li>politika e riprovimit</li><li>integrimi me Resend</li></ul></div>
+      <div class="card layer"><h3>data</h3><p class="muted">src/data</p><ul><li>repositories</li><li>i vetmi vend me SQL</li><li>migrimet, transaksionet</li></ul></div>
+      <div class="card layer"><h3>models</h3><p class="muted">src/models</p><ul><li>entitete, DTO</li><li>gabime të domenit</li><li>pa varësi</li></ul></div>
+    </div>
+    <p class="muted" style="margin-top:10px;font-size:13px">Rregullat kontrollohen automatikisht nga <code>test/architecture.test.js</code>.</p>
+  </section>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const time = (d) => (d ? new Date(d).toLocaleTimeString() : '–');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function api(method, url, body) {
+  const res = await fetch(url, {
+    method,
+    headers: body ? { 'Content-Type': 'application/json' } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const json = await res.json().catch(() => null);
+  return { status: res.status, json };
+}
+
+function showResponse(el, method, url, { status, json }) {
+  el.hidden = false;
+  el.textContent = `${method} ${url}  →  HTTP ${status}\n\n${JSON.stringify(json, null, 2)}`;
+}
+
+/* ---------- Health ---------- */
+async function refreshHealth() {
+  const pill = $('#health');
+  try {
+    const { status, json } = await api('GET', '/health');
+    $('#h-code').textContent = status;
+    $('#h-app').textContent = `${json.app.status} · v${json.app.version} · uptime ${json.app.uptimeSeconds}s`;
+    $('#h-db').textContent = json.database.status === 'up' ? `up (${json.database.latencyMs} ms)` : 'DOWN';
+    pill.className = 'pill ' + (status === 200 ? 'ok' : 'bad');
+    pill.innerHTML = `<span class="dot"></span>${status === 200 ? 'Healthy' : 'DB down'} · HTTP ${status}`;
+  } catch {
+    $('#h-code').textContent = '–';
+    pill.className = 'pill bad';
+    pill.innerHTML = '<span class="dot"></span>Serveri nuk përgjigjet';
+  }
+}
+
+/* ---------- Stats + table ---------- */
+const seen = new Map(); // id -> status, to flash changed rows
+
+async function refreshJobs() {
+  try {
+    const [stats, list] = await Promise.all([api('GET', '/emails/stats'), api('GET', '/emails?limit=15')]);
+    for (const s of ['pending', 'sent', 'failed']) $('#s-' + s).textContent = stats.json.data[s];
+
+    const rows = list.json.data.map((j) => {
+      const changed = seen.has(j.id) && seen.get(j.id) !== j.status + j.attempts;
+      seen.set(j.id, j.status + j.attempts);
+      const retry = j.status === 'failed' ? `<button class="secondary" data-retry="${esc(j.id)}">Riprovo</button>` : '';
+      return `<tr class="${changed ? 'flash' : ''}">
+        <td><span class="badge ${esc(j.status)}">${esc(j.status)}</span></td>
+        <td>${esc(j.to)}</td>
+        <td>${esc(j.subject)}</td>
+        <td class="mono">${j.attempts}/${j.maxAttempts}</td>
+        <td class="err">${esc(j.lastError) || '<span class="muted">–</span>'}</td>
+        <td class="mono">${j.nextAttemptAt && j.attempts > 0 ? time(j.nextAttemptAt) : '–'}</td>
+        <td class="mono">${time(j.createdAt)}</td>
+        <td>${retry}</td></tr>`;
+    });
+    $('#jobs').innerHTML = rows.join('') || '<tr><td colspan="8" class="muted">Asnjë job ende.</td></tr>';
+    $('#last-refresh').textContent = 'rifreskuar ' + new Date().toLocaleTimeString();
+  } catch {
+    $('#last-refresh').textContent = 'gabim gjatë rifreskimit (a është ndezur DB?)';
+  }
+}
+
+$('#jobs').addEventListener('click', async (e) => {
+  const id = e.target.dataset.retry;
+  if (!id) return;
+  e.target.disabled = true;
+  await api('POST', `/emails/${id}/retry`);
+  track(id);
+  refreshJobs();
+});
+
+/* ---------- Flow highlight + job tracker ---------- */
+async function animateFlow(steps) {
+  for (const step of steps) {
+    document.querySelectorAll('.node').forEach((n) => n.classList.toggle('active', n.dataset.step === step));
+    await sleep(450);
+  }
+}
+function clearFlow() { document.querySelectorAll('.node').forEach((n) => n.classList.remove('active')); }
+
+let trackToken = 0;
+async function track(id) {
+  const token = ++trackToken;
+  $('#tracker-empty').hidden = true;
+  $('#tracker-id').hidden = false;
+  $('#tracker-id').innerHTML = `Job: <code>${esc(id)}</code>`;
+  const tl = $('#timeline');
+  tl.innerHTML = '';
+  const add = (cls, text) => tl.insertAdjacentHTML('beforeend', `<li class="${cls}"><time>${new Date().toLocaleTimeString()}</time>${text}</li>`);
+
+  add('pending', 'Kërkesa u pranua (202). Job-i u ruajt në DB si <b>pending</b> — asgjë s\'është dërguar ende.');
+  await animateFlow(['api', 'service', 'data']);
+
+  let last = 'pending:0';
+  for (let i = 0; i < 120 && token === trackToken; i++) {
+    const { json } = await api('GET', `/emails/${id}`);
+    const j = json?.data;
+    if (!j) break;
+    const key = `${j.status}:${j.attempts}`;
+    if (key !== last) {
+      last = key;
+      if (j.status === 'sent') {
+        await animateFlow(['worker', 'resend']);
+        add('sent', `Worker-i e mori dhe Resend e pranoi → <b>sent</b> (përpjekja ${j.attempts}). ID: <code>${esc(j.providerMessageId)}</code>`);
+        break;
+      }
+      if (j.status === 'failed') {
+        await animateFlow(['worker', 'resend']);
+        add('failed', `Përpjekja ${j.attempts}/${j.maxAttempts} dështoi → <b>failed</b> përfundimisht. Gabimi: ${esc(j.lastError)}`);
+        break;
+      }
+      if (j.attempts > 0) {
+        await animateFlow(['worker', 'resend']);
+        add('pending', `Përpjekja ${j.attempts}/${j.maxAttempts} dështoi (${esc(j.lastError)}). Mbetet <b>pending</b>, riprovim në ${time(j.nextAttemptAt)}.`);
+      }
+    }
+    await sleep(700);
+  }
+  if (token === trackToken) clearFlow();
+}
+
+/* ---------- Forms ---------- */
+document.querySelectorAll('[data-to]').forEach((b) => b.addEventListener('click', () => { $('#to').value = b.dataset.to; }));
+
+$('#email-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const body = { to: $('#to').value.trim(), subject: $('#subject').value, text: $('#text').value };
+  const res = await api('POST', '/emails', body);
+  showResponse($('#email-response'), 'POST', '/emails', res);
+  if (res.status === 202) { track(res.json.data.id); refreshJobs(); }
+});
+
+$('#u-email').value = `user${Date.now().toString().slice(-5)}@example.com`;
+$('#user-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const body = { name: $('#u-name').value, email: $('#u-email').value.trim() };
+  const res = await api('POST', '/users', body);
+  showResponse($('#user-response'), 'POST', '/users', res);
+  if (res.status === 201) {
+    track(res.json.data.welcomeEmail.id);
+    refreshJobs();
+    $('#u-email').value = `user${Date.now().toString().slice(-5)}@example.com`;
+  }
+});
+
+/* ---------- Polling ---------- */
+refreshHealth(); refreshJobs();
+setInterval(refreshHealth, 3000);
+setInterval(refreshJobs, 2000);
+</script>
+</body>
+</html>

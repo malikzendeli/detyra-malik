@@ -136,6 +136,10 @@ npm run dev                   # API + worker on http://localhost:3000
 npm test                      # unit, HTTP and architecture tests
 ```
 
+**No PostgreSQL installed?** Run `npm run db:local` in a separate terminal. It starts a real PostgreSQL
+server from `node_modules` on port 5433 (data kept in `.local-db/`, git-ignored). Then set
+`DATABASE_URL=postgres://postgres:postgres@localhost:5433/mail_queue`.
+
 To run everything in Docker instead: `docker compose up --build`. This starts Postgres, runs the
 migrations and starts the app.
 
