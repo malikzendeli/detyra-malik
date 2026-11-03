@@ -1,0 +1,30 @@
+# Render Blueprint: New > Blueprint > pick this repo. Creates the database and the web service.
+# Set RESEND_API_KEY (and EMAIL_FROM if you verified a domain) in the dashboard when prompted.
+databases:
+  - name: mail-queue-db
+    plan: free
+    databaseName: mail_queue
+
+services:
+  - type: web
+    name: mail-queue-api
+    runtime: node
+    plan: free
+    buildCommand: npm ci --omit=dev
+    startCommand: npm run migrate && npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: mail-queue-db
+          property: connectionString
+      - key: PGSSL
+        value: "false" # internal connection string; set true if you use the external URL
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        value: Mail Queue <onboarding@resend.dev>
+      - key: WORKER_ENABLED
+        value: "true"
